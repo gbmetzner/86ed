@@ -1,0 +1,36 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# production build
+/build
+
+# env files
+.env*.local
+.env
+
+# debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# misc
+.DS_Store
+*.pem
+
+# vercel
+.vercel
+
+# IDE
+/.idea/
+
+# local tooling
+/.claude/
+/.playwright-mcp/
