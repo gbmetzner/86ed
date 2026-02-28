@@ -6,25 +6,38 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "test:coverage": "vitest run --coverage --config vitest.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
+    "ioredis": "^5.3.2",
     "next": "14.2.29",
     "react": "^18",
     "react-dom": "^18",
-    "ioredis": "^5.3.2",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/uuid": "^9.0.7",
-    "tailwindcss": "^3.4.1",
-    "postcss": "^8",
+    "@vitejs/plugin-react": "^4.7.0",
+    "@vitest/coverage-v8": "^4.0.18",
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
-    "eslint-config-next": "14.2.29"
+    "eslint-config-next": "14.2.29",
+    "happy-dom": "^20.7.0",
+    "jsdom": "^27.0.1",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "testcontainers": "^11.12.0",
+    "typescript": "^5",
+    "vitest": "^4.0.18"
   }
 }
