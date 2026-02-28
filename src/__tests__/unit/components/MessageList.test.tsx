@@ -55,19 +55,19 @@ describe('MessageList', () => {
   })
 
   it('shows the empty-state placeholder when there are no messages', () => {
-    render(<MessageList roomId="room-1" sessionId="sess-1" />)
+    render(<MessageList roomId="room-1" sessionId="sess-1" handle="gustavo" />)
     expect(screen.getByText(/nothing yet/i)).toBeInTheDocument()
   })
 
   it('opens an SSE connection with the correct URL', () => {
-    render(<MessageList roomId="room-1" sessionId="sess-1" />)
+    render(<MessageList roomId="room-1" sessionId="sess-1" handle="gustavo" />)
     const es = MockEventSource.latest()
     expect(es.url).toContain('/api/stream/room-1')
     expect(es.url).toContain('sessionId=sess-1')
   })
 
   it('renders messages received from the SSE stream', async () => {
-    render(<MessageList roomId="room-1" sessionId="sess-1" />)
+    render(<MessageList roomId="room-1" sessionId="sess-1" handle="gustavo" />)
 
     await act(async () => {
       emitMessage(MockEventSource.latest(), {
@@ -82,7 +82,7 @@ describe('MessageList', () => {
   })
 
   it('renders multiple messages in order', async () => {
-    render(<MessageList roomId="room-1" sessionId="sess-1" />)
+    render(<MessageList roomId="room-1" sessionId="sess-1" handle="gustavo" />)
     const es = MockEventSource.latest()
     const now = Date.now()
 
@@ -101,7 +101,7 @@ describe('MessageList', () => {
   it('purges messages older than 5 minutes when the expiry interval fires', async () => {
     const oldTs = Date.now() - 6 * 60 * 1000 // 6 minutes ago
 
-    render(<MessageList roomId="room-1" sessionId="sess-1" />)
+    render(<MessageList roomId="room-1" sessionId="sess-1" handle="gustavo" />)
 
     await act(async () => {
       emitMessage(MockEventSource.latest(), {
@@ -125,7 +125,7 @@ describe('MessageList', () => {
   it('keeps messages younger than 5 minutes after the expiry interval fires', async () => {
     const recentTs = Date.now() - 2 * 60 * 1000 // 2 minutes ago
 
-    render(<MessageList roomId="room-1" sessionId="sess-1" />)
+    render(<MessageList roomId="room-1" sessionId="sess-1" handle="gustavo" />)
 
     await act(async () => {
       emitMessage(MockEventSource.latest(), {
@@ -143,7 +143,7 @@ describe('MessageList', () => {
   })
 
   it('closes the EventSource connection on unmount', () => {
-    const { unmount } = render(<MessageList roomId="room-1" sessionId="sess-1" />)
+    const { unmount } = render(<MessageList roomId="room-1" sessionId="sess-1" handle="gustavo" />)
     const es = MockEventSource.latest()
     unmount()
     expect(es.readyState).toBe(MockEventSource.CLOSED)

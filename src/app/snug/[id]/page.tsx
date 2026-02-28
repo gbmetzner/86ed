@@ -68,7 +68,7 @@ export default function SnugPage() {
 
       <PresenceBar roomId={roomId} />
 
-      <MessageList roomId={roomId} sessionId={sessionId} />
+      <MessageList roomId={roomId} sessionId={sessionId} handle={handle} />
 
       <MessageInput roomId={roomId} sessionId={sessionId} handle={handle} />
     </div>
