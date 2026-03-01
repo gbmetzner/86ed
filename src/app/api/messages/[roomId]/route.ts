@@ -23,7 +23,7 @@ export async function POST(
     messagesKey(roomId),
     '*',
     { handle, text },
-    { maxlen: { count: 200, approximate: true } },
+    { trim: { type: 'MAXLEN', comparison: '~', threshold: 200 } },
   )
 
   return NextResponse.json({ id })

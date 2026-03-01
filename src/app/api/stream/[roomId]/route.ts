@@ -33,21 +33,24 @@ export async function GET(
         if (closed) return
         try {
           // XREAD returns null when no new entries
-          const results = await redis.xread<Record<string, string>>(
-            [{ key: streamKey, id: lastId }],
-            { count: 20 },
-          )
+          // Result shape: [[streamName, [[msgId, [f1, v1, f2, v2, ...]], ...]], ...] | null
+          const results = await redis.xread(streamKey, lastId, { count: 20 }) as
+            [string, [string, string[]][]][] | null
 
-          if (results) {
-            const { messages: entries } = results[0]
+          if (results && results.length > 0) {
+            const [, entries] = results[0]
             const now = Date.now()
 
-            for (const { id: entryId, message } of entries) {
+            for (const [entryId, fields] of entries) {
               lastId = entryId
               const entryTs = parseInt(entryId.split('-')[0], 10)
               if (now - entryTs > FIVE_MIN_MS) continue
 
-              const data = JSON.stringify({ id: entryId, ...message })
+              const obj: Record<string, string> = {}
+              for (let i = 0; i < fields.length; i += 2) {
+                obj[fields[i]] = fields[i + 1]
+              }
+              const data = JSON.stringify({ id: entryId, ...obj })
               controller.enqueue(encoder.encode(`data: ${data}\n\n`))
             }
           }
