@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import PresenceBar from '@/components/PresenceBar'
 import MessageList from '@/components/MessageList'
 import MessageInput from '@/components/MessageInput'
+import TypingIndicator from '@/components/TypingIndicator'
 
 export default function SnugPage() {
   const { id: roomId } = useParams<{ id: string }>()
@@ -12,6 +13,8 @@ export default function SnugPage() {
 
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [handle, setHandle] = useState<string | null>(null)
+  const [soundEnabled, setSoundEnabled] = useState(true)
+  const [copied, setCopied] = useState(false)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -27,7 +30,6 @@ export default function SnugPage() {
     setSessionId(sid)
     setHandle(h)
 
-    // Heartbeat every 20s
     heartbeatRef.current = setInterval(() => {
       fetch('/api/heartbeat', {
         method: 'POST',
@@ -36,12 +38,8 @@ export default function SnugPage() {
       }).catch(() => {})
     }, 20_000)
 
-    // Leave on tab close
     function onUnload() {
-      navigator.sendBeacon(
-        '/api/leave',
-        JSON.stringify({ roomId, sessionId: sid }),
-      )
+      navigator.sendBeacon('/api/leave', JSON.stringify({ roomId, sessionId: sid }))
     }
     window.addEventListener('beforeunload', onUnload)
 
@@ -50,6 +48,13 @@ export default function SnugPage() {
       window.removeEventListener('beforeunload', onUnload)
     }
   }, [roomId, router])
+
+  function copyRoomLink() {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2_000)
+    }).catch(() => {})
+  }
 
   if (!sessionId || !handle) {
     return (
@@ -60,17 +65,47 @@ export default function SnugPage() {
   }
 
   return (
-    <div className="h-screen flex flex-col">
-      <header className="px-4 py-3 border-b border-amber-pub/10 flex items-center justify-between">
-        <span className="text-amber-pub text-xs tracking-widest uppercase">86ed</span>
-        <span className="text-dim text-xs opacity-50 truncate max-w-[180px]">{roomId.slice(0, 8)}</span>
-      </header>
+    <div className="h-screen flex flex-col items-center">
+      {/* Centered column — comfortable on 4K/ultrawide screens */}
+      <div className="w-full max-w-3xl flex flex-col h-full min-h-0">
 
-      <PresenceBar roomId={roomId} />
+        <header className="px-4 py-3 border-b border-amber-pub/10 flex items-center justify-between shrink-0">
+          <span className="text-amber-pub text-xs tracking-widest uppercase">86ed</span>
+          <div className="flex items-center gap-4">
+            {/* Copy room link */}
+            <button
+              onClick={copyRoomLink}
+              className="text-dim text-xs opacity-50 hover:opacity-90 transition-opacity"
+              title="copy room link"
+            >
+              {copied ? 'copied!' : roomId.slice(0, 8)}
+            </button>
 
-      <MessageList roomId={roomId} sessionId={sessionId} handle={handle} />
+            {/* Sound toggle */}
+            <button
+              onClick={() => setSoundEnabled(p => !p)}
+              className="text-dim text-xs opacity-40 hover:opacity-80 transition-opacity"
+              title={soundEnabled ? 'mute sounds' : 'unmute sounds'}
+            >
+              {soundEnabled ? '🔔' : '🔕'}
+            </button>
+          </div>
+        </header>
 
-      <MessageInput roomId={roomId} sessionId={sessionId} handle={handle} />
+        <PresenceBar roomId={roomId} currentHandle={handle} />
+
+        <MessageList
+          roomId={roomId}
+          sessionId={sessionId}
+          handle={handle}
+          soundEnabled={soundEnabled}
+        />
+
+        <TypingIndicator roomId={roomId} sessionId={sessionId} />
+
+        <MessageInput roomId={roomId} sessionId={sessionId} handle={handle} />
+
+      </div>
     </div>
   )
 }

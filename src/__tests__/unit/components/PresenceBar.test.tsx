@@ -17,22 +17,22 @@ describe('PresenceBar', () => {
 
   it('renders nothing when the handles list is empty', async () => {
     vi.stubGlobal('fetch', mockFetchWith([]))
-    const { container } = render(<PresenceBar roomId="room-1" />)
+    const { container } = render(<PresenceBar roomId="room-1" currentHandle="alice" />)
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     expect(container.firstChild).toBeNull()
   })
 
   it('renders each handle in the room', async () => {
     vi.stubGlobal('fetch', mockFetchWith(['alice', 'bob']))
-    render(<PresenceBar roomId="room-1" />)
-    expect(await screen.findByText('alice')).toBeInTheDocument()
+    render(<PresenceBar roomId="room-1" currentHandle="alice" />)
+    expect(await screen.findByText('alice (you)')).toBeInTheDocument()
     expect(screen.getByText('bob')).toBeInTheDocument()
   })
 
   it('calls the correct presence API endpoint', async () => {
     const mockFetch = mockFetchWith([])
     vi.stubGlobal('fetch', mockFetch)
-    render(<PresenceBar roomId="my-room-id" />)
+    render(<PresenceBar roomId="my-room-id" currentHandle="alice" />)
     await waitFor(() => expect(mockFetch).toHaveBeenCalled())
     expect(mockFetch).toHaveBeenCalledWith('/api/presence/my-room-id')
   })
@@ -49,7 +49,7 @@ describe('PresenceBar', () => {
     const mockFetch = mockFetchWith(['alice'])
     vi.stubGlobal('fetch', mockFetch)
 
-    render(<PresenceBar roomId="room-1" />)
+    render(<PresenceBar roomId="room-1" currentHandle="alice" />)
 
     // Initial fetch runs immediately in the effect
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1))
@@ -68,7 +68,7 @@ describe('PresenceBar', () => {
     const mockFetch = mockFetchWith(['alice'])
     vi.stubGlobal('fetch', mockFetch)
 
-    const { unmount } = render(<PresenceBar roomId="room-1" />)
+    const { unmount } = render(<PresenceBar roomId="room-1" currentHandle="alice" />)
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1))
 
     unmount()

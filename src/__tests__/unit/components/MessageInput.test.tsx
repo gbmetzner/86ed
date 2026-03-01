@@ -41,8 +41,8 @@ describe('MessageInput', () => {
     const textarea = screen.getByPlaceholderText('say something...')
     await user.type(textarea, 'hello{Shift>}{Enter}{/Shift}')
 
-    // Shift+Enter inserts a newline in the textarea (no preventDefault called)
-    expect(vi.mocked(fetch)).not.toHaveBeenCalled()
+    // Shift+Enter inserts a newline but does NOT send the message
+    expect(vi.mocked(fetch)).not.toHaveBeenCalledWith('/api/messages/room-1', expect.anything())
     expect(textarea).toHaveValue('hello\n')
   })
 
@@ -53,7 +53,7 @@ describe('MessageInput', () => {
     const textarea = screen.getByPlaceholderText('say something...')
     await user.type(textarea, '   {Enter}')
 
-    expect(vi.mocked(fetch)).not.toHaveBeenCalled()
+    expect(vi.mocked(fetch)).not.toHaveBeenCalledWith('/api/messages/room-1', expect.anything())
   })
 
   it('trims the message text before sending', async () => {
