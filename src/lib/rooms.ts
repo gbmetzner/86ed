@@ -18,12 +18,12 @@ export async function getPresence(roomId: string): Promise<string[]> {
   const pattern = `room:${roomId}:presence:*`
   const keys: string[] = []
 
-  let cursor = '0'
+  let cursor: number | string = 0
   do {
-    const [next, found] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100)
+    const [next, found] = await redis.scan(cursor as number, { match: pattern, count: 100 })
     cursor = next
     keys.push(...found)
-  } while (cursor !== '0')
+  } while (Number(cursor) !== 0)
 
   if (keys.length === 0) return []
   const values = await redis.mget(...keys)
@@ -35,7 +35,7 @@ export async function cleanStaleRooms(): Promise<void> {
   const roomIds = await redis.smembers(ROOMS_KEY)
   for (const roomId of roomIds) {
     const pattern = `room:${roomId}:presence:*`
-    const [, keys] = await redis.scan('0', 'MATCH', pattern, 'COUNT', 100)
+    const [, keys] = await redis.scan(0, { match: pattern, count: 100 })
     if (keys.length === 0) {
       await redis.srem(ROOMS_KEY, roomId)
     }
@@ -56,7 +56,7 @@ export async function allocateRoom(
   for (const roomId of roomIds) {
     const handles = await getPresence(roomId)
     if (handles.length < MAX_ROOM_SIZE) {
-      await redis.set(presenceKey(roomId, sessionId), handle, 'EX', PRESENCE_TTL)
+      await redis.set(presenceKey(roomId, sessionId), handle, { ex: PRESENCE_TTL })
       return roomId
     }
   }
@@ -64,6 +64,6 @@ export async function allocateRoom(
   // All rooms full — create a new one
   const newRoomId = uuidv4()
   await redis.sadd(ROOMS_KEY, newRoomId)
-  await redis.set(presenceKey(newRoomId, sessionId), handle, 'EX', PRESENCE_TTL)
+  await redis.set(presenceKey(newRoomId, sessionId), handle, { ex: PRESENCE_TTL })
   return newRoomId
 }

@@ -1,28 +1,35 @@
-import { GenericContainer, type StartedTestContainer } from 'testcontainers'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { Redis } from '@upstash/redis'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { NextRequest } from 'next/server'
-import type { Redis } from 'ioredis'
+import { POST as POST_join } from '@/app/api/join/route'
+import { POST as POST_messages } from '@/app/api/messages/[roomId]/route'
+import { POST as POST_heartbeat } from '@/app/api/heartbeat/route'
+import { POST as POST_leave } from '@/app/api/leave/route'
+import { GET as GET_presence } from '@/app/api/presence/[roomId]/route'
+import { presenceKey, messagesKey } from '@/lib/rooms'
 
 // ---------------------------------------------------------------------------
-// Types for dynamically-imported route handlers
+// Skip the entire suite when Upstash credentials are not configured.
 // ---------------------------------------------------------------------------
-type JoinRoute = typeof import('@/app/api/join/route')
-type MessagesRoute = typeof import('@/app/api/messages/[roomId]/route')
-type HeartbeatRoute = typeof import('@/app/api/heartbeat/route')
-type LeaveRoute = typeof import('@/app/api/leave/route')
-type PresenceRoute = typeof import('@/app/api/presence/[roomId]/route')
-type RoomsModule = typeof import('@/lib/rooms')
 
-let container: StartedTestContainer
-let redisClient: Redis
+const hasUpstash = !!(
+  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+)
 
-let POST_join: JoinRoute['POST']
-let POST_messages: MessagesRoute['POST']
-let POST_heartbeat: HeartbeatRoute['POST']
-let POST_leave: LeaveRoute['POST']
-let GET_presence: PresenceRoute['GET']
-let presenceKey: RoomsModule['presenceKey']
-let messagesKey: RoomsModule['messagesKey']
+const redis = hasUpstash
+  ? new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL!,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+    })
+  : null
+
+beforeEach(async () => {
+  await redis?.flushdb()
+})
+
+afterAll(async () => {
+  await redis?.flushdb()
+})
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,45 +48,10 @@ function get(url: string): NextRequest {
 }
 
 // ---------------------------------------------------------------------------
-// Suite setup
-// ---------------------------------------------------------------------------
-
-beforeAll(async () => {
-  container = await new GenericContainer('redis:7-alpine')
-    .withExposedPorts(6379)
-    .start()
-
-  const url = `redis://${container.getHost()}:${container.getMappedPort(6379)}`
-  process.env.REDIS_URL = url
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  delete (globalThis as any)._redis
-
-  ;({ POST: POST_join } = await import('@/app/api/join/route'))
-  ;({ POST: POST_messages } = await import('@/app/api/messages/[roomId]/route'))
-  ;({ POST: POST_heartbeat } = await import('@/app/api/heartbeat/route'))
-  ;({ POST: POST_leave } = await import('@/app/api/leave/route'))
-  ;({ GET: GET_presence } = await import('@/app/api/presence/[roomId]/route'))
-  ;({ presenceKey, messagesKey } = await import('@/lib/rooms'))
-
-  const { default: redisModule } = await import('@/lib/redis')
-  redisClient = redisModule
-})
-
-afterAll(async () => {
-  await redisClient?.quit()
-  await container?.stop()
-})
-
-beforeEach(async () => {
-  await redisClient.flushdb()
-})
-
-// ---------------------------------------------------------------------------
 // POST /api/join
 // ---------------------------------------------------------------------------
 
-describe('POST /api/join', () => {
+describe.skipIf(!hasUpstash)('POST /api/join', () => {
   it('returns 400 when handle is missing', async () => {
     const res = await POST_join(post('http://localhost/api/join', {}))
     expect(res.status).toBe(400)
@@ -105,7 +77,7 @@ describe('POST /api/join', () => {
     const res = await POST_join(post('http://localhost/api/join', { handle: 'alice' }))
     const { roomId, sessionId } = await res.json()
 
-    const handle = await redisClient.get(presenceKey(roomId, sessionId))
+    const handle = await redis!.get(presenceKey(roomId, sessionId))
     expect(handle).toBe('alice')
   })
 })
@@ -114,12 +86,11 @@ describe('POST /api/join', () => {
 // POST /api/messages/[roomId]
 // ---------------------------------------------------------------------------
 
-describe('POST /api/messages/[roomId]', () => {
+describe.skipIf(!hasUpstash)('POST /api/messages/[roomId]', () => {
   let roomId: string
   let sessionId: string
 
   beforeEach(async () => {
-    // Join a room to get a valid roomId + sessionId with presence
     const res = await POST_join(post('http://localhost/api/join', { handle: 'alice' }))
     ;({ roomId, sessionId } = await res.json())
   })
@@ -169,7 +140,7 @@ describe('POST /api/messages/[roomId]', () => {
       { params: { roomId } },
     )
 
-    const len = await redisClient.xlen(messagesKey(roomId))
+    const len = await redis!.xlen(messagesKey(roomId))
     expect(len).toBe(1)
   })
 })
@@ -178,7 +149,7 @@ describe('POST /api/messages/[roomId]', () => {
 // POST /api/heartbeat
 // ---------------------------------------------------------------------------
 
-describe('POST /api/heartbeat', () => {
+describe.skipIf(!hasUpstash)('POST /api/heartbeat', () => {
   it('returns 400 when fields are missing', async () => {
     const res = await POST_heartbeat(
       post('http://localhost/api/heartbeat', { roomId: 'r1' }),
@@ -189,15 +160,15 @@ describe('POST /api/heartbeat', () => {
   it('returns 200 and refreshes the presence TTL', async () => {
     const roomId = 'hb-room'
     const sessionId = 'hb-sess'
-    await redisClient.set(presenceKey(roomId, sessionId), 'alice', 'EX', 5)
+    await redis!.set(presenceKey(roomId, sessionId), 'alice', { ex: 5 })
 
     const res = await POST_heartbeat(
       post('http://localhost/api/heartbeat', { roomId, sessionId, handle: 'alice' }),
     )
     expect(res.status).toBe(200)
 
-    const ttl = await redisClient.ttl(presenceKey(roomId, sessionId))
-    expect(ttl).toBeGreaterThan(5) // refreshed to 30 s
+    const ttl = await redis!.ttl(presenceKey(roomId, sessionId))
+    expect(ttl).toBeGreaterThan(5)
   })
 })
 
@@ -205,7 +176,7 @@ describe('POST /api/heartbeat', () => {
 // POST /api/leave
 // ---------------------------------------------------------------------------
 
-describe('POST /api/leave', () => {
+describe.skipIf(!hasUpstash)('POST /api/leave', () => {
   it('returns 400 when fields are missing', async () => {
     const res = await POST_leave(
       post('http://localhost/api/leave', { roomId: 'r1' }),
@@ -216,14 +187,14 @@ describe('POST /api/leave', () => {
   it('returns 200 and removes the presence key', async () => {
     const roomId = 'leave-room'
     const sessionId = 'leave-sess'
-    await redisClient.set(presenceKey(roomId, sessionId), 'alice', 'EX', 30)
+    await redis!.set(presenceKey(roomId, sessionId), 'alice', { ex: 30 })
 
     const res = await POST_leave(
       post('http://localhost/api/leave', { roomId, sessionId }),
     )
     expect(res.status).toBe(200)
 
-    const exists = await redisClient.exists(presenceKey(roomId, sessionId))
+    const exists = await redis!.exists(presenceKey(roomId, sessionId))
     expect(exists).toBe(0)
   })
 })
@@ -232,7 +203,7 @@ describe('POST /api/leave', () => {
 // GET /api/presence/[roomId]
 // ---------------------------------------------------------------------------
 
-describe('GET /api/presence/[roomId]', () => {
+describe.skipIf(!hasUpstash)('GET /api/presence/[roomId]', () => {
   it('returns an empty handles array for a room with no users', async () => {
     const res = await GET_presence(
       get('http://localhost/api/presence/empty-room'),
@@ -246,8 +217,8 @@ describe('GET /api/presence/[roomId]', () => {
 
   it('returns the handles of all users in the room', async () => {
     const roomId = 'presence-room'
-    await redisClient.set(presenceKey(roomId, 'sess-1'), 'alice', 'EX', 30)
-    await redisClient.set(presenceKey(roomId, 'sess-2'), 'bob', 'EX', 30)
+    await redis!.set(presenceKey(roomId, 'sess-1'), 'alice', { ex: 30 })
+    await redis!.set(presenceKey(roomId, 'sess-2'), 'bob', { ex: 30 })
 
     const res = await GET_presence(
       get(`http://localhost/api/presence/${roomId}`),

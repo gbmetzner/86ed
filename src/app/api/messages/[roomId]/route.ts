@@ -21,14 +21,9 @@ export async function POST(
 
   const id = await redis.xadd(
     messagesKey(roomId),
-    'MAXLEN',
-    '~',
-    '200',
     '*',
-    'handle',
-    handle,
-    'text',
-    text,
+    { handle, text },
+    { maxlen: { count: 200, approximate: true } },
   )
 
   return NextResponse.json({ id })

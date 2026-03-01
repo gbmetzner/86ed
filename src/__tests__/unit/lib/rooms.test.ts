@@ -46,13 +46,13 @@ describe('getPresence', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('returns an empty array when no presence keys exist', async () => {
-    r.scan.mockResolvedValue(['0', []])
+    r.scan.mockResolvedValue([0, []])
     expect(await getPresence('room-1')).toEqual([])
     expect(r.mget).not.toHaveBeenCalled()
   })
 
   it('returns all handles in the room', async () => {
-    r.scan.mockResolvedValue(['0', [
+    r.scan.mockResolvedValue([0, [
       'room:room-1:presence:s1',
       'room:room-1:presence:s2',
     ]])
@@ -61,7 +61,7 @@ describe('getPresence', () => {
   })
 
   it('filters out null values from expired keys', async () => {
-    r.scan.mockResolvedValue(['0', [
+    r.scan.mockResolvedValue([0, [
       'room:room-1:presence:s1',
       'room:room-1:presence:s2',
     ]])
@@ -71,8 +71,8 @@ describe('getPresence', () => {
 
   it('handles paginated SCAN responses', async () => {
     r.scan
-      .mockResolvedValueOnce(['cursor-1', ['room:room-1:presence:s1']])
-      .mockResolvedValueOnce(['0', ['room:room-1:presence:s2']])
+      .mockResolvedValueOnce([42, ['room:room-1:presence:s1']])
+      .mockResolvedValueOnce([0, ['room:room-1:presence:s2']])
     r.mget.mockResolvedValue(['alice', 'bob'])
 
     const result = await getPresence('room-1')
@@ -102,7 +102,7 @@ describe('cleanStaleRooms', () => {
 
   it('does not remove rooms that have active presence keys', async () => {
     r.smembers.mockResolvedValue(['active-room'])
-    r.scan.mockResolvedValue(['0', ['room:active-room:presence:s1']])
+    r.scan.mockResolvedValue([0, ['room:active-room:presence:s1']])
     await cleanStaleRooms()
     expect(r.srem).not.toHaveBeenCalled()
   })
@@ -110,8 +110,8 @@ describe('cleanStaleRooms', () => {
   it('removes rooms that have no active presence keys', async () => {
     r.smembers.mockResolvedValue(['stale-room', 'active-room'])
     r.scan
-      .mockResolvedValueOnce(['0', []])                                     // stale-room: empty
-      .mockResolvedValueOnce(['0', ['room:active-room:presence:s1']])       // active-room: has users
+      .mockResolvedValueOnce([0, []])                                     // stale-room: empty
+      .mockResolvedValueOnce([0, ['room:active-room:presence:s1']])       // active-room: has users
     r.srem.mockResolvedValue(1)
 
     await cleanStaleRooms()
@@ -131,7 +131,7 @@ describe('allocateRoom', () => {
   it('creates a new room when no rooms exist', async () => {
     // cleanStaleRooms + allocateRoom both call smembers — both return []
     r.smembers.mockResolvedValue([])
-    r.scan.mockResolvedValue(['0', []])
+    r.scan.mockResolvedValue([0, []])
     r.sadd.mockResolvedValue(1)
     r.set.mockResolvedValue('OK')
 
@@ -143,8 +143,7 @@ describe('allocateRoom', () => {
     expect(r.set).toHaveBeenCalledWith(
       `room:${roomId}:presence:sess-1`,
       'alice',
-      'EX',
-      30,
+      { ex: 30 },
     )
   })
 
@@ -154,7 +153,7 @@ describe('allocateRoom', () => {
     r.smembers
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(['existing-room'])
-    r.scan.mockResolvedValue(['0', ['room:existing-room:presence:s1']])
+    r.scan.mockResolvedValue([0, ['room:existing-room:presence:s1']])
     r.mget.mockResolvedValue(['alice'])
     r.set.mockResolvedValue('OK')
 
@@ -165,8 +164,7 @@ describe('allocateRoom', () => {
     expect(r.set).toHaveBeenCalledWith(
       'room:existing-room:presence:new-sess',
       'bob',
-      'EX',
-      30,
+      { ex: 30 },
     )
   })
 
@@ -177,7 +175,7 @@ describe('allocateRoom', () => {
     r.smembers
       .mockResolvedValueOnce([])         // cleanStaleRooms
       .mockResolvedValueOnce(['full'])    // allocateRoom
-    r.scan.mockResolvedValue(['0', fullKeys])
+    r.scan.mockResolvedValue([0, fullKeys])
     r.mget.mockResolvedValue(fullHandles)
     r.sadd.mockResolvedValue(1)
     r.set.mockResolvedValue('OK')
@@ -189,8 +187,7 @@ describe('allocateRoom', () => {
     expect(r.set).toHaveBeenCalledWith(
       `room:${roomId}:presence:new-sess`,
       'new-user',
-      'EX',
-      30,
+      { ex: 30 },
     )
   })
 
@@ -198,7 +195,7 @@ describe('allocateRoom', () => {
     r.smembers
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(['room-xyz'])
-    r.scan.mockResolvedValue(['0', ['room:room-xyz:presence:s1']])
+    r.scan.mockResolvedValue([0, ['room:room-xyz:presence:s1']])
     r.mget.mockResolvedValue(['carol'])
     r.set.mockResolvedValue('OK')
 

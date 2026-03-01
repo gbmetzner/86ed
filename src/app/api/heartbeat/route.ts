@@ -9,6 +9,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'roomId, sessionId, handle required' }, { status: 400 })
   }
 
-  await redis.set(presenceKey(roomId, sessionId), handle, 'EX', 30)
+  await redis.set(presenceKey(roomId, sessionId), handle, { ex: 30 })
   return new NextResponse(null, { status: 200 })
 }

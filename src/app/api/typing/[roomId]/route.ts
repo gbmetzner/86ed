@@ -24,7 +24,7 @@ export async function POST(
   const isPresent = await redis.exists(presenceKey(roomId, sessionId))
   if (!isPresent) return new NextResponse(null, { status: 204 })
 
-  await redis.set(typingKey(roomId, sessionId), handle, 'EX', TYPING_TTL)
+  await redis.set(typingKey(roomId, sessionId), handle, { ex: TYPING_TTL })
   return new NextResponse(null, { status: 204 })
 }
 
@@ -38,12 +38,12 @@ export async function GET(
 
   const pattern = `room:${roomId}:typing:*`
   const keys: string[] = []
-  let cursor = '0'
+  let cursor: number | string = 0
   do {
-    const [next, found] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100)
+    const [next, found] = await redis.scan(cursor as number, { match: pattern, count: 100 })
     cursor = next
     keys.push(...found)
-  } while (cursor !== '0')
+  } while (Number(cursor) !== 0)
 
   const otherKeys = keys.filter(k => !k.endsWith(`:${selfSessionId}`))
   if (otherKeys.length === 0) return NextResponse.json({ handles: [] })
