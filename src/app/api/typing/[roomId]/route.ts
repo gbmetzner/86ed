@@ -38,12 +38,12 @@ export async function GET(
 
   const pattern = `room:${roomId}:typing:*`
   const keys: string[] = []
-  let cursor: number | string = 0
+  let cursor = '0'
   do {
-    const [next, found] = await redis.scan(cursor as number, { match: pattern, count: 100 })
-    cursor = next
+    const [nextCursor, found] = await redis.scan(cursor as unknown as number, { match: pattern, count: 100 })
+    cursor = String(nextCursor)
     keys.push(...found)
-  } while (Number(cursor) !== 0)
+  } while (cursor !== '0')
 
   const otherKeys = keys.filter(k => !k.endsWith(`:${selfSessionId}`))
   if (otherKeys.length === 0) return NextResponse.json({ handles: [] })

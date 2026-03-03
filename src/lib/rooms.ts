@@ -18,12 +18,12 @@ export async function getPresence(roomId: string): Promise<string[]> {
   const pattern = `room:${roomId}:presence:*`
   const keys: string[] = []
 
-  let cursor: number | string = 0
+  let cursor = '0'
   do {
-    const [next, found] = await redis.scan(cursor as number, { match: pattern, count: 100 })
-    cursor = next
+    const [nextCursor, found] = await redis.scan(cursor as unknown as number, { match: pattern, count: 100 })
+    cursor = String(nextCursor)
     keys.push(...found)
-  } while (Number(cursor) !== 0)
+  } while (cursor !== '0')
 
   if (keys.length === 0) return []
   const values = await redis.mget(...keys)
