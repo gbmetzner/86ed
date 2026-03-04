@@ -1,41 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-
 interface Props {
-  roomId: string
-  sessionId: string
+  handles: string[]
 }
 
-export default function TypingIndicator({ roomId, sessionId }: Props) {
-  const [typing, setTyping] = useState<string[]>([])
+export default function TypingIndicator({ handles }: Props) {
+  if (handles.length === 0) return null
 
-  useEffect(() => {
-    let active = true
-
-    async function poll() {
-      try {
-        const res = await fetch(`/api/typing/${roomId}?sessionId=${sessionId}`)
-        if (res.ok && active) {
-          const { handles } = await res.json()
-          setTyping(handles)
-        }
-      } catch {
-        // silent
-      }
-    }
-
-    poll()
-    const interval = setInterval(poll, 2_000)
-    return () => {
-      active = false
-      clearInterval(interval)
-    }
-  }, [roomId, sessionId])
-
-  if (typing.length === 0) return null
-
-  const names = typing.slice(0, 3) // cap display at 3 names
+  const names = handles.slice(0, 3)
   const label =
     names.length === 1
       ? `${names[0]} is typing`

@@ -25,6 +25,12 @@ export async function POST(
   if (!isPresent) return new NextResponse(null, { status: 204 })
 
   await redis.set(typingKey(roomId, sessionId), handle, { ex: TYPING_TTL })
+
+  await redis.publish(
+    `room:${roomId}:events`,
+    JSON.stringify({ type: 'typing', handle }),
+  )
+
   return new NextResponse(null, { status: 204 })
 }
 
@@ -40,7 +46,7 @@ export async function GET(
   const keys: string[] = []
   let cursor = '0'
   do {
-    const [nextCursor, found] = await redis.scan(cursor as unknown as number, { match: pattern, count: 100 })
+    const [nextCursor, found] = await redis.scan(cursor, { match: pattern, count: 100 })
     cursor = String(nextCursor)
     keys.push(...found)
   } while (cursor !== '0')

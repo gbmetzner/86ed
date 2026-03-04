@@ -26,5 +26,12 @@ export async function POST(
     { trim: { type: 'MAXLEN', comparison: '~', threshold: 200 } },
   )
 
+  if (id) {
+    await redis.publish(
+      `room:${roomId}:events`,
+      JSON.stringify({ type: 'message', id, handle, text }),
+    )
+  }
+
   return NextResponse.json({ id })
 }

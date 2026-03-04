@@ -14,6 +14,7 @@ interface Props {
   sessionId: string
   handle: string
   soundEnabled: boolean
+  onSseEvent: React.MutableRefObject<((e: MessageEvent) => void) | null>
 }
 
 const FIVE_MIN_MS = 5 * 60 * 1000
@@ -57,7 +58,7 @@ function playChime() {
   }
 }
 
-export default function MessageList({ roomId, sessionId, handle, soundEnabled }: Props) {
+export default function MessageList({ roomId, sessionId, handle, soundEnabled, onSseEvent }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [now, setNow] = useState(Date.now())
   const [unread, setUnread] = useState(0)
@@ -69,24 +70,19 @@ export default function MessageList({ roomId, sessionId, handle, soundEnabled }:
   const soundRef = useRef(soundEnabled)
   useEffect(() => { soundRef.current = soundEnabled }, [soundEnabled])
 
-  // SSE connection
+  // Register SSE event handler via ref (EventSource is owned by the page)
   useEffect(() => {
-    const es = new EventSource(`/api/stream/${roomId}?sessionId=${sessionId}`)
-
-    es.onmessage = (e) => {
-      const msg: Message = JSON.parse(e.data)
-      setMessages(prev => [...prev, msg])
-      if (soundRef.current && msg.handle !== handle) {
+    onSseEvent.current = (e: MessageEvent) => {
+      const event = JSON.parse(e.data)
+      const isMsg = !event.type || event.type === 'message'
+      if (!isMsg) return
+      setMessages(prev => [...prev, { id: event.id, handle: event.handle, text: event.text }])
+      if (soundRef.current && event.handle !== handle) {
         playChime()
       }
     }
-
-    es.onerror = () => {
-      // SSE auto-reconnects
-    }
-
-    return () => es.close()
-  }, [roomId, sessionId, handle])
+    return () => { onSseEvent.current = null }
+  }, [handle, onSseEvent])
 
   // Expiry purge every 30 s
   useEffect(() => {

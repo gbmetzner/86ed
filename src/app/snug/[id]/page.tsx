@@ -15,7 +15,12 @@ export default function SnugPage() {
   const [handle, setHandle] = useState<string | null>(null)
   const [soundEnabled, setSoundEnabled] = useState(true)
   const [copied, setCopied] = useState(false)
+  const [typingHandles, setTypingHandles] = useState<string[]>([])
+
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const onSseMessage = useRef<((e: MessageEvent) => void) | null>(null)
+  const handleRef = useRef<string | null>(null)
+  const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   useEffect(() => {
     const sid = sessionStorage.getItem('sessionId')
@@ -29,6 +34,7 @@ export default function SnugPage() {
 
     setSessionId(sid)
     setHandle(h)
+    handleRef.current = h
 
     heartbeatRef.current = setInterval(() => {
       fetch('/api/heartbeat', {
@@ -48,6 +54,52 @@ export default function SnugPage() {
       window.removeEventListener('beforeunload', onUnload)
     }
   }, [roomId, router])
+
+  // Own the single EventSource and route events to consumers
+  useEffect(() => {
+    if (!sessionId) return
+
+    const timers = typingTimers.current
+    const es = new EventSource(`/api/stream/${roomId}?sessionId=${sessionId}`)
+
+    es.onmessage = (e: MessageEvent) => {
+      try {
+        const event = JSON.parse(e.data)
+        if (event.type === 'message' || !event.type) {
+          onSseMessage.current?.(e)
+        } else if (event.type === 'typing') {
+          const typingHandle = event.handle as string
+          if (typingHandle === handleRef.current) return
+
+          setTypingHandles(prev => {
+            if (prev.includes(typingHandle)) return prev
+            return [...prev, typingHandle]
+          })
+
+          // Cancel any existing timer for this handle and set a new one
+          const existing = timers.get(typingHandle)
+          if (existing) clearTimeout(existing)
+          const timer = setTimeout(() => {
+            setTypingHandles(prev => prev.filter(h => h !== typingHandle))
+            timers.delete(typingHandle)
+          }, 4_000)
+          timers.set(typingHandle, timer)
+        }
+      } catch {
+        // malformed event — ignore
+      }
+    }
+
+    es.onerror = () => {
+      // SSE auto-reconnects
+    }
+
+    return () => {
+      es.close()
+      timers.forEach(t => clearTimeout(t))
+      timers.clear()
+    }
+  }, [roomId, sessionId])
 
   function copyRoomLink() {
     navigator.clipboard.writeText(window.location.href).then(() => {
@@ -99,9 +151,10 @@ export default function SnugPage() {
           sessionId={sessionId}
           handle={handle}
           soundEnabled={soundEnabled}
+          onSseEvent={onSseMessage}
         />
 
-        <TypingIndicator roomId={roomId} sessionId={sessionId} />
+        <TypingIndicator handles={typingHandles} />
 
         <MessageInput roomId={roomId} sessionId={sessionId} handle={handle} />
 
