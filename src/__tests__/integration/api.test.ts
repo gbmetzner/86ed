@@ -1,4 +1,4 @@
-import { Redis } from '@upstash/redis'
+import Redis from 'ioredis'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { NextRequest } from 'next/server'
 import { POST as POST_join } from '@/app/api/join/route'
@@ -6,22 +6,16 @@ import { POST as POST_messages } from '@/app/api/messages/[roomId]/route'
 import { POST as POST_heartbeat } from '@/app/api/heartbeat/route'
 import { POST as POST_leave } from '@/app/api/leave/route'
 import { GET as GET_presence } from '@/app/api/presence/[roomId]/route'
-import { presenceKey, messagesKey } from '@/lib/rooms'
+import { membersKey, messagesKey } from '@/lib/rooms'
 
 // ---------------------------------------------------------------------------
-// Skip the entire suite when Upstash credentials are not configured.
+// Use local Redis when REDIS_URL is set (Docker), otherwise skip
 // ---------------------------------------------------------------------------
 
-const hasUpstash = !!(
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-)
+const REDIS_URL = process.env.REDIS_URL
+const canTest = !!REDIS_URL
 
-const redis = hasUpstash
-  ? new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL!,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-    })
-  : null
+const redis = canTest ? new Redis(REDIS_URL!) : null
 
 beforeEach(async () => {
   await redis?.flushdb()
@@ -29,6 +23,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await redis?.flushdb()
+  await redis?.quit()
 })
 
 // ---------------------------------------------------------------------------
@@ -51,7 +46,7 @@ function get(url: string): NextRequest {
 // POST /api/join
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!hasUpstash)('POST /api/join', () => {
+describe.skipIf(!canTest)('POST /api/join', () => {
   it('returns 400 when handle is missing', async () => {
     const res = await POST_join(post('http://localhost/api/join', {}))
     expect(res.status).toBe(400)
@@ -62,23 +57,33 @@ describe.skipIf(!hasUpstash)('POST /api/join', () => {
     expect(res.status).toBe(400)
   })
 
-  it('returns 200 with roomId and sessionId on valid handle', async () => {
+  it('returns 200 with roomId, sessionId, and colorIndex on valid handle', async () => {
     const res = await POST_join(post('http://localhost/api/join', { handle: 'alice' }))
     expect(res.status).toBe(200)
 
     const body = await res.json()
     expect(typeof body.roomId).toBe('string')
     expect(typeof body.sessionId).toBe('string')
-    expect(body.roomId.length).toBeGreaterThan(0)
-    expect(body.sessionId.length).toBeGreaterThan(0)
+    expect(typeof body.colorIndex).toBe('number')
+    expect(body.colorIndex).toBe(0)
   })
 
-  it('registers presence in Redis after joining', async () => {
+  it('registers presence in the members hash after joining', async () => {
     const res = await POST_join(post('http://localhost/api/join', { handle: 'alice' }))
     const { roomId, sessionId } = await res.json()
 
-    const handle = await redis!.get(presenceKey(roomId, sessionId))
-    expect(handle).toBe('alice')
+    const raw = await redis!.hget(membersKey(roomId), sessionId)
+    expect(raw).toMatch(/^alice:0:\d+$/)
+  })
+
+  it('assigns unique color slots to consecutive joiners', async () => {
+    const res1 = await POST_join(post('http://localhost/api/join', { handle: 'alice' }))
+    const { colorIndex: ci1 } = await res1.json()
+
+    const res2 = await POST_join(post('http://localhost/api/join', { handle: 'bob' }))
+    const { colorIndex: ci2 } = await res2.json()
+
+    expect(ci1).not.toBe(ci2)
   })
 })
 
@@ -86,7 +91,7 @@ describe.skipIf(!hasUpstash)('POST /api/join', () => {
 // POST /api/messages/[roomId]
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!hasUpstash)('POST /api/messages/[roomId]', () => {
+describe.skipIf(!canTest)('POST /api/messages/[roomId]', () => {
   let roomId: string
   let sessionId: string
 
@@ -149,7 +154,7 @@ describe.skipIf(!hasUpstash)('POST /api/messages/[roomId]', () => {
 // POST /api/heartbeat
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!hasUpstash)('POST /api/heartbeat', () => {
+describe.skipIf(!canTest)('POST /api/heartbeat', () => {
   it('returns 400 when fields are missing', async () => {
     const res = await POST_heartbeat(
       post('http://localhost/api/heartbeat', { roomId: 'r1' }),
@@ -157,18 +162,39 @@ describe.skipIf(!hasUpstash)('POST /api/heartbeat', () => {
     expect(res.status).toBe(400)
   })
 
-  it('returns 200 and refreshes the presence TTL', async () => {
-    const roomId = 'hb-room'
-    const sessionId = 'hb-sess'
-    await redis!.set(presenceKey(roomId, sessionId), 'alice', { ex: 5 })
+  it('returns 200 and refreshes the member expiresAt', async () => {
+    // First join to set up the hash
+    const joinRes = await POST_join(post('http://localhost/api/join', { handle: 'alice' }))
+    const { roomId, sessionId } = await joinRes.json()
+
+    // Get current expiresAt
+    const before = await redis!.hget(membersKey(roomId), sessionId)
+    const beforeExpiry = parseInt(before!.split(':').pop()!, 10)
+
+    await new Promise(r => setTimeout(r, 10)) // small delay
 
     const res = await POST_heartbeat(
-      post('http://localhost/api/heartbeat', { roomId, sessionId, handle: 'alice' }),
+      post('http://localhost/api/heartbeat', { roomId, sessionId, handle: 'alice', colorIndex: 0 }),
     )
     expect(res.status).toBe(200)
 
-    const ttl = await redis!.ttl(presenceKey(roomId, sessionId))
-    expect(ttl).toBeGreaterThan(5)
+    // expiresAt should be updated to a later time
+    const after = await redis!.hget(membersKey(roomId), sessionId)
+    const afterExpiry = parseInt(after!.split(':').pop()!, 10)
+    expect(afterExpiry).toBeGreaterThanOrEqual(beforeExpiry)
+  })
+
+  it('refreshes the hash-level TTL', async () => {
+    const joinRes = await POST_join(post('http://localhost/api/join', { handle: 'alice' }))
+    const { roomId, sessionId } = await joinRes.json()
+
+    await POST_heartbeat(
+      post('http://localhost/api/heartbeat', { roomId, sessionId, handle: 'alice', colorIndex: 0 }),
+    )
+
+    const ttl = await redis!.ttl(membersKey(roomId))
+    expect(ttl).toBeGreaterThan(0)
+    expect(ttl).toBeLessThanOrEqual(90)
   })
 })
 
@@ -176,7 +202,7 @@ describe.skipIf(!hasUpstash)('POST /api/heartbeat', () => {
 // POST /api/leave
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!hasUpstash)('POST /api/leave', () => {
+describe.skipIf(!canTest)('POST /api/leave', () => {
   it('returns 400 when fields are missing', async () => {
     const res = await POST_leave(
       post('http://localhost/api/leave', { roomId: 'r1' }),
@@ -184,18 +210,17 @@ describe.skipIf(!hasUpstash)('POST /api/leave', () => {
     expect(res.status).toBe(400)
   })
 
-  it('returns 200 and removes the presence key', async () => {
-    const roomId = 'leave-room'
-    const sessionId = 'leave-sess'
-    await redis!.set(presenceKey(roomId, sessionId), 'alice', { ex: 30 })
+  it('returns 200 and removes the member from the hash', async () => {
+    const joinRes = await POST_join(post('http://localhost/api/join', { handle: 'alice' }))
+    const { roomId, sessionId } = await joinRes.json()
 
     const res = await POST_leave(
       post('http://localhost/api/leave', { roomId, sessionId }),
     )
     expect(res.status).toBe(200)
 
-    const exists = await redis!.exists(presenceKey(roomId, sessionId))
-    expect(exists).toBe(0)
+    const raw = await redis!.hget(membersKey(roomId), sessionId)
+    expect(raw).toBeNull()
   })
 })
 
@@ -203,7 +228,7 @@ describe.skipIf(!hasUpstash)('POST /api/leave', () => {
 // GET /api/presence/[roomId]
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!hasUpstash)('GET /api/presence/[roomId]', () => {
+describe.skipIf(!canTest)('GET /api/presence/[roomId]', () => {
   it('returns an empty handles array for a room with no users', async () => {
     const res = await GET_presence(
       get('http://localhost/api/presence/empty-room'),
@@ -215,10 +240,10 @@ describe.skipIf(!hasUpstash)('GET /api/presence/[roomId]', () => {
     expect(body.handles).toEqual([])
   })
 
-  it('returns the handles of all users in the room', async () => {
-    const roomId = 'presence-room'
-    await redis!.set(presenceKey(roomId, 'sess-1'), 'alice', { ex: 30 })
-    await redis!.set(presenceKey(roomId, 'sess-2'), 'bob', { ex: 30 })
+  it('returns the presence entries with handle and colorIndex', async () => {
+    const join1 = await POST_join(post('http://localhost/api/join', { handle: 'alice' }))
+    const { roomId } = await join1.json()
+    await POST_join(post('http://localhost/api/join', { handle: 'bob' }))
 
     const res = await GET_presence(
       get(`http://localhost/api/presence/${roomId}`),
@@ -227,7 +252,13 @@ describe.skipIf(!hasUpstash)('GET /api/presence/[roomId]', () => {
     const body = await res.json()
 
     expect(body.handles).toHaveLength(2)
-    expect(body.handles).toContain('alice')
-    expect(body.handles).toContain('bob')
+    const handles = body.handles.map((e: { handle: string }) => e.handle)
+    expect(handles).toContain('alice')
+    expect(handles).toContain('bob')
+
+    // Each entry has a colorIndex
+    body.handles.forEach((entry: { handle: string; colorIndex: number }) => {
+      expect(typeof entry.colorIndex).toBe('number')
+    })
   })
 })

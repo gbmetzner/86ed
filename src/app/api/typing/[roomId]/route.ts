@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import redis from '@/lib/redis'
-import { presenceKey } from '@/lib/rooms'
+import { membersKey } from '@/lib/rooms'
 
 const TYPING_TTL = 3 // seconds
 
@@ -20,9 +20,9 @@ export async function POST(
     return NextResponse.json({ error: 'sessionId and handle required' }, { status: 400 })
   }
 
-  // Silently drop if the user isn't in the room (e.g. expired presence)
-  const isPresent = await redis.exists(presenceKey(roomId, sessionId))
-  if (!isPresent) return new NextResponse(null, { status: 204 })
+  // Silently drop if the user isn't in the room
+  const raw = await redis.hget(membersKey(roomId), sessionId)
+  if (!raw) return new NextResponse(null, { status: 204 })
 
   await redis.set(typingKey(roomId, sessionId), handle, { ex: TYPING_TTL })
 
@@ -32,29 +32,4 @@ export async function POST(
   )
 
   return new NextResponse(null, { status: 204 })
-}
-
-// GET — return who is currently typing (excluding the caller)
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { roomId: string } },
-) {
-  const { roomId } = params
-  const selfSessionId = req.nextUrl.searchParams.get('sessionId') ?? ''
-
-  const pattern = `room:${roomId}:typing:*`
-  const keys: string[] = []
-  let cursor = '0'
-  do {
-    const [nextCursor, found] = await redis.scan(cursor, { match: pattern, count: 100 })
-    cursor = String(nextCursor)
-    keys.push(...found)
-  } while (cursor !== '0')
-
-  const otherKeys = keys.filter(k => !k.endsWith(`:${selfSessionId}`))
-  if (otherKeys.length === 0) return NextResponse.json({ handles: [] })
-
-  const values = await redis.mget(...otherKeys)
-  const handles = values.filter((v): v is string => v !== null)
-  return NextResponse.json({ handles })
 }

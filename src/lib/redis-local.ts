@@ -32,12 +32,42 @@ const local = {
     return client.set(key, value)
   },
 
+  async get(key: string): Promise<string | null> {
+    return client.get(key)
+  },
+
   async exists(key: string) {
     return client.exists(key) as Promise<0 | 1>
   },
 
   async del(key: string) {
     return client.del(key)
+  },
+
+  async hset(key: string, field: string, value: string) {
+    return client.hset(key, field, value)
+  },
+
+  async hget(key: string, field: string): Promise<string | null> {
+    return client.hget(key, field)
+  },
+
+  async hgetall(key: string): Promise<Record<string, string> | null> {
+    const result = await client.hgetall(key)
+    // ioredis returns {} for missing keys; normalise to null
+    return Object.keys(result).length === 0 ? null : result
+  },
+
+  async hdel(key: string, field: string) {
+    return client.hdel(key, field)
+  },
+
+  async hlen(key: string) {
+    return client.hlen(key)
+  },
+
+  async expire(key: string, seconds: number) {
+    return client.expire(key, seconds)
   },
 
   // xadd(key, id, fields, { trim: { type, comparison, threshold } })
@@ -58,8 +88,7 @@ const local = {
     return client.xadd(key, ...(args as string[]))
   },
 
-  // xread(key, id, { count }) — returns same shape as @upstash/redis raw result:
-  // [[streamName, [[msgId, [f1,v1,...]], ...]], ...] | null
+  // xread(key, id, { count }) — returns same shape as @upstash/redis raw result
   async xread(
     key: string,
     id: string,

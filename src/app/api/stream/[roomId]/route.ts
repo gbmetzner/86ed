@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import redis from '@/lib/redis'
-import { messagesKey } from '@/lib/rooms'
+import { messagesKey, getPresence } from '@/lib/rooms'
 import { createSubscriber } from '@/lib/redis-local'
 
 export const dynamic = 'force-dynamic'
@@ -39,7 +39,15 @@ export async function GET(
       // Subscribe FIRST to avoid race between history and new events
       await sub.subscribe(channel)
 
-      // One-time XREAD to replay recent history
+      // Send initial presence snapshot
+      const presenceEntries = await getPresence(roomId)
+      const presenceData = JSON.stringify({
+        type: 'presence',
+        handles: presenceEntries.map(({ handle, colorIndex }) => ({ handle, colorIndex })),
+      })
+      controller.enqueue(encoder.encode(`data: ${presenceData}\n\n`))
+
+      // One-time XREAD to replay recent message history
       const history = await redis.xread(streamKey, '0', { count: 200 }) as
         [string, [string, string[]][]][] | null
 
@@ -60,13 +68,12 @@ export async function GET(
         }
       }
 
-      // Forward Pub/Sub events
+      // Forward Pub/Sub events (messages, typing, presence)
       sub.on('message', (ch: string, raw: string) => {
         if (closed) return
         try {
           const event = JSON.parse(raw)
           if (event.type === 'message') {
-            // Dedup: skip if this message was already sent from history
             if (lastId !== '0' && !streamIdGt(event.id, lastId)) return
             lastId = event.id
           }

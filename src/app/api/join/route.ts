@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
-import { allocateRoom } from '@/lib/rooms'
+import { allocateRoom, publishPresence } from '@/lib/rooms'
 
 export async function POST(req: NextRequest) {
   const { handle } = await req.json()
@@ -10,7 +10,10 @@ export async function POST(req: NextRequest) {
   }
 
   const sessionId = uuidv4()
-  const roomId = await allocateRoom(handle.trim(), sessionId)
+  const { roomId, colorIndex } = await allocateRoom(handle.trim(), sessionId)
 
-  return NextResponse.json({ roomId, sessionId })
+  // Push updated presence to all connected clients
+  await publishPresence(roomId)
+
+  return NextResponse.json({ roomId, sessionId, colorIndex })
 }

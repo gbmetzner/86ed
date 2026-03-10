@@ -1,18 +1,20 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { handleColor } from '@/lib/handle-color'
+import { paletteColor } from '@/lib/handle-color'
 
 interface Message {
   id: string
   handle: string
   text: string
+  colorIndex: number
 }
 
 interface Props {
   roomId: string
   sessionId: string
   handle: string
+  colorIndex: number
   soundEnabled: boolean
   onSseEvent: React.MutableRefObject<((e: MessageEvent) => void) | null>
 }
@@ -58,25 +60,28 @@ function playChime() {
   }
 }
 
-export default function MessageList({ roomId, sessionId, handle, soundEnabled, onSseEvent }: Props) {
+export default function MessageList({ roomId, sessionId, handle, colorIndex, soundEnabled, onSseEvent }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [now, setNow] = useState(Date.now())
   const [unread, setUnread] = useState(0)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
-  // Use a ref so the SSE handler always reads the latest soundEnabled
-  // without needing to reconnect when the toggle changes
   const soundRef = useRef(soundEnabled)
   useEffect(() => { soundRef.current = soundEnabled }, [soundEnabled])
 
-  // Register SSE event handler via ref (EventSource is owned by the page)
+  // Register SSE event handler via ref
   useEffect(() => {
     onSseEvent.current = (e: MessageEvent) => {
       const event = JSON.parse(e.data)
       const isMsg = !event.type || event.type === 'message'
       if (!isMsg) return
-      setMessages(prev => [...prev, { id: event.id, handle: event.handle, text: event.text }])
+      setMessages(prev => [...prev, {
+        id: event.id,
+        handle: event.handle,
+        text: event.text,
+        colorIndex: event.colorIndex ?? 0,
+      }])
       if (soundRef.current && event.handle !== handle) {
         playChime()
       }
@@ -93,13 +98,13 @@ export default function MessageList({ roomId, sessionId, handle, soundEnabled, o
     return () => clearInterval(timer)
   }, [])
 
-  // Clock tick every 10 s — drives timestamps and expiry badges
+  // Clock tick every 10 s
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 10_000)
     return () => clearInterval(timer)
   }, [])
 
-  // Auto-scroll when at bottom; count unread when scrolled away
+  // Auto-scroll / unread counter
   useEffect(() => {
     if (messages.length === 0) return
     const el = scrollRef.current
@@ -148,6 +153,7 @@ export default function MessageList({ roomId, sessionId, handle, soundEnabled, o
           const ts = msgTs(msg.id)
           const expiryLabel = expiresIn(ts, now)
           const timeLabel = expiryLabel ? `⏱ ${expiryLabel}` : relativeTime(ts, now)
+          const color = paletteColor(isMine ? colorIndex : msg.colorIndex)
 
           return (
             <div
@@ -157,7 +163,7 @@ export default function MessageList({ roomId, sessionId, handle, soundEnabled, o
               {!isMine && isNewSender && (
                 <span
                   className="text-xs mb-1 px-1 font-medium"
-                  style={{ color: handleColor(msg.handle) }}
+                  style={{ color }}
                 >
                   {msg.handle}
                 </span>
@@ -165,11 +171,7 @@ export default function MessageList({ roomId, sessionId, handle, soundEnabled, o
 
               <div
                 className={`
-                  max-w-[72%] px-3 py-2 text-sm leading-relaxed break-words
-                  ${isMine
-                    ? 'bg-amber-pub/15 border border-amber-pub/25 text-warm'
-                    : 'bg-warm/5 border border-warm/10 text-warm'
-                  }
+                  max-w-[72%] px-3 py-2 text-sm leading-relaxed break-words text-warm
                   ${isNewSender && isLastInGroup
                     ? 'rounded-xl'
                     : isNewSender
@@ -179,6 +181,10 @@ export default function MessageList({ roomId, sessionId, handle, soundEnabled, o
                         : isMine ? 'rounded-md rounded-r-xl' : 'rounded-md rounded-l-xl'
                   }
                 `}
+                style={{
+                  backgroundColor: `${color}18`,
+                  border: `1px solid ${color}50`,
+                }}
               >
                 {msg.text}
               </div>

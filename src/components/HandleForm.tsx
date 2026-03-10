@@ -29,10 +29,11 @@ export default function HandleForm() {
         return
       }
 
-      const { roomId, sessionId } = await res.json()
+      const { roomId, sessionId, colorIndex } = await res.json()
       sessionStorage.setItem('sessionId', sessionId)
       sessionStorage.setItem('handle', trimmed)
       sessionStorage.setItem('roomId', roomId)
+      sessionStorage.setItem('colorIndex', String(colorIndex))
       router.push(`/snug/${roomId}`)
     } catch {
       setError('connection error')

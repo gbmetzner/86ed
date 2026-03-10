@@ -3,10 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import MessageList from '@/components/MessageList'
 
-// ---------------------------------------------------------------------------
-// Helper — mount with a shared ref
-// ---------------------------------------------------------------------------
-
 function renderML(handle = 'gustavo') {
   const onSseEvent = React.createRef<((e: MessageEvent) => void) | null>() as
     React.MutableRefObject<((e: MessageEvent) => void) | null>
@@ -16,6 +12,7 @@ function renderML(handle = 'gustavo') {
       roomId="room-1"
       sessionId="sess-1"
       handle={handle}
+      colorIndex={0}
       soundEnabled={false}
       onSseEvent={onSseEvent}
     />,
@@ -26,10 +23,6 @@ function renderML(handle = 'gustavo') {
 function emit(ref: React.MutableRefObject<((e: MessageEvent) => void) | null>, payload: object) {
   ref.current?.(new MessageEvent('message', { data: JSON.stringify(payload) }))
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe('MessageList', () => {
   beforeEach(() => {
@@ -49,7 +42,7 @@ describe('MessageList', () => {
     const { onSseEvent } = renderML()
 
     await act(async () => {
-      emit(onSseEvent, { type: 'message', id: `${Date.now()}-0`, handle: 'alice', text: 'hello world' })
+      emit(onSseEvent, { type: 'message', id: `${Date.now()}-0`, handle: 'alice', text: 'hello world', colorIndex: 1 })
     })
 
     expect(screen.getByText('alice')).toBeInTheDocument()
@@ -61,6 +54,16 @@ describe('MessageList', () => {
 
     await act(async () => {
       emit(onSseEvent, { type: 'typing', handle: 'alice' })
+    })
+
+    expect(screen.getByText(/nothing yet/i)).toBeInTheDocument()
+  })
+
+  it('ignores presence events', async () => {
+    const { onSseEvent } = renderML()
+
+    await act(async () => {
+      emit(onSseEvent, { type: 'presence', handles: [{ handle: 'alice', colorIndex: 0 }] })
     })
 
     expect(screen.getByText(/nothing yet/i)).toBeInTheDocument()
@@ -82,8 +85,8 @@ describe('MessageList', () => {
     const now = Date.now()
 
     await act(async () => {
-      emit(onSseEvent, { type: 'message', id: `${now}-0`, handle: 'alice', text: 'first' })
-      emit(onSseEvent, { type: 'message', id: `${now + 1}-0`, handle: 'bob', text: 'second' })
+      emit(onSseEvent, { type: 'message', id: `${now}-0`, handle: 'alice', text: 'first', colorIndex: 0 })
+      emit(onSseEvent, { type: 'message', id: `${now + 1}-0`, handle: 'bob', text: 'second', colorIndex: 1 })
     })
 
     const messages = screen.getAllByRole('generic').filter(el =>
@@ -94,16 +97,15 @@ describe('MessageList', () => {
   })
 
   it('purges messages older than 5 minutes when the expiry interval fires', async () => {
-    const oldTs = Date.now() - 6 * 60 * 1000 // 6 minutes ago
+    const oldTs = Date.now() - 6 * 60 * 1000
     const { onSseEvent } = renderML()
 
     await act(async () => {
-      emit(onSseEvent, { type: 'message', id: `${oldTs}-0`, handle: 'alice', text: 'old message' })
+      emit(onSseEvent, { type: 'message', id: `${oldTs}-0`, handle: 'alice', text: 'old message', colorIndex: 0 })
     })
 
     expect(screen.getByText('old message')).toBeInTheDocument()
 
-    // Advance past the 30-second expiry interval
     await act(async () => {
       vi.advanceTimersByTime(30_000)
     })
@@ -113,11 +115,11 @@ describe('MessageList', () => {
   })
 
   it('keeps messages younger than 5 minutes after the expiry interval fires', async () => {
-    const recentTs = Date.now() - 2 * 60 * 1000 // 2 minutes ago
+    const recentTs = Date.now() - 2 * 60 * 1000
     const { onSseEvent } = renderML()
 
     await act(async () => {
-      emit(onSseEvent, { type: 'message', id: `${recentTs}-0`, handle: 'bob', text: 'recent message' })
+      emit(onSseEvent, { type: 'message', id: `${recentTs}-0`, handle: 'bob', text: 'recent message', colorIndex: 1 })
     })
 
     await act(async () => {

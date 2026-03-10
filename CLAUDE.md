@@ -16,8 +16,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-Once the project is initialized, standard Next.js commands apply:
-
 ```bash
 npm run dev       # Start development server
 npm run build     # Build for production

@@ -1,6 +1,6 @@
-// Deterministic colour assignment from a handle string.
-// Palette is muted to suit the dark pub aesthetic.
-const PALETTE = [
+// Six distinct, high-visibility colors suited to the dark pub aesthetic.
+// Index 0–5 are assigned at join time so no two users share a color.
+export const PALETTE = [
   '#7ba7c7', // slate blue
   '#a07cc8', // violet
   '#7cc8a0', // mint
@@ -9,10 +9,6 @@ const PALETTE = [
   '#7cc8c0', // teal
 ]
 
-export function handleColor(handle: string): string {
-  let h = 0
-  for (let i = 0; i < handle.length; i++) {
-    h = (Math.imul(31, h) + handle.charCodeAt(i)) | 0
-  }
-  return PALETTE[Math.abs(h) % PALETTE.length]
+export function paletteColor(index: number): string {
+  return PALETTE[index % PALETTE.length]
 }

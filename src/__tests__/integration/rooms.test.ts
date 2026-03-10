@@ -1,22 +1,21 @@
-import { Redis } from '@upstash/redis'
+import Redis from 'ioredis'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { presenceKey, messagesKey, getPresence, cleanStaleRooms, allocateRoom } from '@/lib/rooms'
+import {
+  membersKey,
+  messagesKey,
+  getPresence,
+  cleanStaleRooms,
+  allocateRoom,
+} from '@/lib/rooms'
 
 // ---------------------------------------------------------------------------
-// Skip the entire suite when Upstash credentials are not configured.
-// Set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN to run these tests.
+// Use local Redis when REDIS_URL is set (Docker), otherwise skip
 // ---------------------------------------------------------------------------
 
-const hasUpstash = !!(
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-)
+const REDIS_URL = process.env.REDIS_URL
+const canTest = !!REDIS_URL
 
-const redis = hasUpstash
-  ? new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL!,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-    })
-  : null
+const redis = canTest ? new Redis(REDIS_URL!) : null
 
 beforeEach(async () => {
   await redis?.flushdb()
@@ -24,19 +23,26 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await redis?.flushdb()
+  await redis?.quit()
 })
+
+// Helper: write a fresh (non-expired) member directly into the hash
+async function writeMember(roomId: string, sessionId: string, handle: string, colorIndex: number) {
+  const expiresAt = Date.now() + 30_000
+  await redis!.hset(membersKey(roomId), sessionId, `${handle}:${colorIndex}:${expiresAt}`)
+}
 
 // ---------------------------------------------------------------------------
 // Key helpers
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!hasUpstash)('presenceKey', () => {
+describe.skipIf(!canTest)('membersKey', () => {
   it('produces the expected Redis key', () => {
-    expect(presenceKey('room-1', 'sess-1')).toBe('room:room-1:presence:sess-1')
+    expect(membersKey('room-1')).toBe('room:room-1:members')
   })
 })
 
-describe.skipIf(!hasUpstash)('messagesKey', () => {
+describe.skipIf(!canTest)('messagesKey', () => {
   it('produces the expected Redis key', () => {
     expect(messagesKey('room-1')).toBe('room:room-1:messages')
   })
@@ -46,28 +52,47 @@ describe.skipIf(!hasUpstash)('messagesKey', () => {
 // getPresence
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!hasUpstash)('getPresence', () => {
-  it('returns an empty array for a room with no users', async () => {
+describe.skipIf(!canTest)('getPresence', () => {
+  it('returns empty array for a room with no members', async () => {
     expect(await getPresence('empty-room')).toEqual([])
   })
 
-  it('returns all handles currently in the room', async () => {
-    await redis!.set(presenceKey('room-1', 'sess-1'), 'alice', { ex: 30 })
-    await redis!.set(presenceKey('room-1', 'sess-2'), 'bob', { ex: 30 })
+  it('returns all live members in the room', async () => {
+    await writeMember('room-1', 'sess-1', 'alice', 0)
+    await writeMember('room-1', 'sess-2', 'bob', 1)
 
-    const handles = await getPresence('room-1')
-    expect(handles).toHaveLength(2)
-    expect(handles).toContain('alice')
-    expect(handles).toContain('bob')
+    const entries = await getPresence('room-1')
+    expect(entries).toHaveLength(2)
+    expect(entries.map(e => e.handle)).toContain('alice')
+    expect(entries.map(e => e.handle)).toContain('bob')
   })
 
-  it('excludes handles whose keys have expired (deleted)', async () => {
-    await redis!.set(presenceKey('room-1', 'sess-1'), 'alice', { ex: 30 })
-    await redis!.set(presenceKey('room-1', 'sess-2'), 'ghost', { ex: 30 })
-    await redis!.del(presenceKey('room-1', 'sess-2'))
+  it('returns correct colorIndex for each member', async () => {
+    await writeMember('room-1', 'sess-1', 'alice', 2)
+    const entries = await getPresence('room-1')
+    expect(entries[0].colorIndex).toBe(2)
+  })
 
-    const handles = await getPresence('room-1')
-    expect(handles).toEqual(['alice'])
+  it('excludes members whose expiresAt has passed', async () => {
+    const staleAt = Date.now() - 1000
+    await redis!.hset(membersKey('room-1'), 'stale-sess', `ghost:0:${staleAt}`)
+    await writeMember('room-1', 'fresh-sess', 'alice', 0)
+
+    const entries = await getPresence('room-1')
+    expect(entries).toHaveLength(1)
+    expect(entries[0].handle).toBe('alice')
+  })
+
+  it('removes stale member fields from the hash', async () => {
+    const staleAt = Date.now() - 1000
+    await redis!.hset(membersKey('room-1'), 'stale-sess', `ghost:0:${staleAt}`)
+
+    await getPresence('room-1')
+
+    // Wait for fire-and-forget HDEL
+    await new Promise(r => setTimeout(r, 50))
+    const raw = await redis!.hgetall(membersKey('room-1'))
+    expect(raw['stale-sess']).toBeUndefined()
   })
 })
 
@@ -75,10 +100,10 @@ describe.skipIf(!hasUpstash)('getPresence', () => {
 // cleanStaleRooms
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!hasUpstash)('cleanStaleRooms', () => {
-  it('removes stale rooms (no active presence) from rooms:active', async () => {
+describe.skipIf(!canTest)('cleanStaleRooms', () => {
+  it('removes stale rooms (no live members) from rooms:active', async () => {
     await redis!.sadd('rooms:active', 'stale-room', 'active-room')
-    await redis!.set(presenceKey('active-room', 'sess-1'), 'alice', { ex: 30 })
+    await writeMember('active-room', 'sess-1', 'alice', 0)
 
     await cleanStaleRooms()
 
@@ -87,15 +112,15 @@ describe.skipIf(!hasUpstash)('cleanStaleRooms', () => {
     expect(remaining).not.toContain('stale-room')
   })
 
-  it('leaves all rooms intact when they all have active users', async () => {
-    await redis!.sadd('rooms:active', 'room-1', 'room-2')
-    await redis!.set(presenceKey('room-1', 'sess-1'), 'alice', { ex: 30 })
-    await redis!.set(presenceKey('room-2', 'sess-2'), 'bob', { ex: 30 })
+  it('is rate-limited — skips when lock key exists', async () => {
+    await redis!.set('rooms:cleanup-lock', '1', 'EX', 60)
+    await redis!.sadd('rooms:active', 'orphan-room')
 
     await cleanStaleRooms()
 
-    const remaining = await redis!.smembers('rooms:active')
-    expect(remaining).toHaveLength(2)
+    // orphan-room should still be in the set because cleanup was skipped
+    const rooms = await redis!.smembers('rooms:active')
+    expect(rooms).toContain('orphan-room')
   })
 
   it('is a no-op when rooms:active is empty', async () => {
@@ -109,48 +134,72 @@ describe.skipIf(!hasUpstash)('cleanStaleRooms', () => {
 // allocateRoom
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!hasUpstash)('allocateRoom', () => {
+describe.skipIf(!canTest)('allocateRoom', () => {
   it('creates a brand-new room when none exist', async () => {
-    const roomId = await allocateRoom('alice', 'sess-1')
+    const { roomId, colorIndex } = await allocateRoom('alice', 'sess-1')
 
     expect(typeof roomId).toBe('string')
-    expect(roomId.length).toBeGreaterThan(0)
+    expect(colorIndex).toBe(0)
 
     const rooms = await redis!.smembers('rooms:active')
     expect(rooms).toContain(roomId)
 
-    const handle = await redis!.get(presenceKey(roomId, 'sess-1'))
-    expect(handle).toBe('alice')
+    const raw = await redis!.hget(membersKey(roomId), 'sess-1')
+    expect(raw).toMatch(/^alice:0:\d+$/)
   })
 
   it('assigns a second user to the same room', async () => {
-    const firstRoomId = await allocateRoom('alice', 'sess-1')
-    const secondRoomId = await allocateRoom('bob', 'sess-2')
+    const { roomId: first } = await allocateRoom('alice', 'sess-1')
+    const { roomId: second, colorIndex } = await allocateRoom('bob', 'sess-2')
 
-    expect(secondRoomId).toBe(firstRoomId)
+    expect(second).toBe(first)
+    expect(colorIndex).toBe(1) // slot 0 taken by alice
 
-    const handles = await getPresence(firstRoomId)
-    expect(handles).toContain('alice')
-    expect(handles).toContain('bob')
+    const entries = await getPresence(first)
+    expect(entries.map(e => e.handle)).toContain('alice')
+    expect(entries.map(e => e.handle)).toContain('bob')
   })
 
   it('creates a new room once the existing room reaches the 6-user limit', async () => {
-    const firstRoomId = await allocateRoom('user1', 'sess-1')
+    const { roomId: firstRoom } = await allocateRoom('user1', 'sess-1')
     for (let i = 2; i <= 6; i++) {
-      await redis!.set(presenceKey(firstRoomId, `sess-${i}`), `user${i}`, { ex: 30 })
+      await writeMember(firstRoom, `sess-${i}`, `user${i}`, i - 1)
     }
 
-    const overflowRoomId = await allocateRoom('user7', 'sess-7')
-    expect(overflowRoomId).not.toBe(firstRoomId)
+    const { roomId: overflowRoom } = await allocateRoom('user7', 'sess-7')
+    expect(overflowRoom).not.toBe(firstRoom)
 
     const rooms = await redis!.smembers('rooms:active')
-    expect(rooms).toContain(overflowRoomId)
+    expect(rooms).toContain(overflowRoom)
   })
 
-  it('stores presence with a 30-second TTL', async () => {
-    const roomId = await allocateRoom('alice', 'sess-1')
-    const ttl = await redis!.ttl(presenceKey(roomId, 'sess-1'))
+  it('stores presence with an expiry timestamp in the future', async () => {
+    const before = Date.now()
+    const { roomId } = await allocateRoom('alice', 'sess-1')
+    const raw = await redis!.hget(membersKey(roomId), 'sess-1')
+    expect(raw).toBeTruthy()
+
+    const expiresAt = parseInt(raw!.split(':').pop()!, 10)
+    expect(expiresAt).toBeGreaterThan(before)
+    expect(expiresAt).toBeLessThanOrEqual(before + 31_000)
+  })
+
+  it('assigns unique color slots — no two users share a color', async () => {
+    const { roomId } = await allocateRoom('user0', 'sess-0')
+    const colorIndexes: number[] = [0] // first user always gets 0
+
+    for (let i = 1; i <= 5; i++) {
+      const { colorIndex } = await allocateRoom(`user${i}`, `sess-${i}`)
+      colorIndexes.push(colorIndex)
+    }
+
+    expect(new Set(colorIndexes).size).toBe(6) // all unique
+  })
+
+  it('sets a TTL on the members hash', async () => {
+    const { roomId } = await allocateRoom('alice', 'sess-1')
+    const ttl = await redis!.ttl(membersKey(roomId))
     expect(ttl).toBeGreaterThan(0)
-    expect(ttl).toBeLessThanOrEqual(30)
+    expect(ttl).toBeLessThanOrEqual(90)
   })
 })
